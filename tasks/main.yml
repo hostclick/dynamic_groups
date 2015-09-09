@@ -1,0 +1,78 @@
+---
+# tasks file for dynamic_groups
+- name: install libselinux-python
+  yum: name=libselinux-python state=present
+  tags: always
+  
+- action: setup
+  tags: always
+
+- name: disable SELinux
+  selinux: state=disabled
+  when: ansible_selinux.status|lower != 'disabled'
+  tags: selinux 
+  
+- name: ensure SELinux is turned off
+  command: setenforce 0
+  changed_when: false
+  when: ansible_selinux.status|lower != 'disabled'
+  tags: selinux 
+
+- name: verify if additional NIC is installed
+  shell: cut -f18 /proc/bus/pci/devices | awk NF
+  register: pci_devices_list
+  failed_when: False
+  changed_when: False
+  tags: always
+
+- set_fact: nic_mellanox_10gb_is_present=0
+  tags: always
+
+- set_fact: nic_mellanox_10gb_is_present=1
+  when: pci_devices_list.stdout.find('mlx4') != -1
+  tags: always
+
+- name: add host to group nic_mellanox_10gb
+  group_by: key="nic_mellanox_10gb_{{ nic_mellanox_10gb_is_present }}"
+  changed_when: False
+  tags: always
+
+- name: add host to group kvm_guest
+  group_by: key="{{ ansible_virtualization_type }}_{{ ansible_virtualization_role }}"
+  changed_when: False
+  tags: always
+  
+- name: register software RAID configuration
+  command: "cat /etc/mdadm.conf"
+  register: software_raid_configuration
+  failed_when: false
+  changed_when: false
+  tags: always
+
+- set_fact: software_raid=none
+  tags: always
+
+- set_fact: software_raid=10
+  when: (item | match("ARRAY /dev/md[1-9] level=raid10")) and software_raid_configuration is defined
+  with_items: software_raid_configuration.stdout_lines
+  tags: always
+  
+- set_fact: software_raid=5
+  when: (item | match("ARRAY /dev/md[1-9] level=raid5")) and software_raid_configuration is defined
+  with_items: software_raid_configuration.stdout_lines
+  tags: always
+  
+- set_fact: software_raid=1
+  when: (item | match("ARRAY /dev/md[1-9] level=raid1\s")) and software_raid_configuration is defined
+  with_items: software_raid_configuration.stdout_lines
+  tags: always
+  
+- set_fact: software_raid=2x1
+  when: (item | match("ARRAY /dev/md[2-9] level=raid1\s")) and software_raid_configuration is defined
+  with_items: software_raid_configuration.stdout_lines
+  tags: always
+
+- name: add host to group software_raid
+  group_by: key="software_raid_{{ software_raid }}"
+  changed_when: False
+  tags: always
